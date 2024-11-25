@@ -1,288 +1,249 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <limits.h> // For INT_MAX
-#include <stdbool.h> // For boolean types
+#include <limits.h>
+#include <stdbool.h>
 
+#define MAX_VERTICES 1000
+#define INF INT_MAX
 
-#define MAX_WEIGHTS 10  // Define a max number of weights per edge
-
-// Define the structure to represent an edge (from one node to another)
+// Structure for an edge in the adjacency list
 typedef struct Edge {
-    int to_node;  // To node label
-    int weights[MAX_WEIGHTS];  // Array to store weights for the edge
-    int weight_count;  // Number of weights for this edge
-    struct Edge *next;  // Pointer to the next edge (linked list of edges)
+    int target;          // Target vertex
+    int *weights;        // Array of weights for each period
+    struct Edge *next;   // Pointer to the next edge
 } Edge;
 
-// Define the structure to represent a node
-typedef struct GraphNode {
-    int label;  // Node label
-    Edge *edges;  // Pointer to the list of edges (adjacency list)
-    struct GraphNode *next;  // Pointer to the next node in the graph (linked list)
-} GraphNode;
+// Structure for the graph
+typedef struct Graph {
+    int V;               // Number of vertices
+    int N;               // Period of weights
+    Edge *adj[MAX_VERTICES]; // Adjacency list
+} Graph;
 
-// Function to create a new graph node
-GraphNode* create_node(int label) {
-    GraphNode *new_node = (GraphNode*)malloc(sizeof(GraphNode));
-    if (new_node == NULL) {
-        perror("Error allocating memory for new node");
+// Structure for a node in the priority queue
+typedef struct Node {
+    int vertex;
+    int step;
+    int cost;
+} Node;
+
+// Min-heap for priority queue
+typedef struct MinHeap {
+    Node *nodes[MAX_VERTICES * 10];
+    int size;
+} MinHeap;
+
+// Function to create a new graph
+Graph *create_graph(int V, int N) {
+    Graph *graph = malloc(sizeof(Graph));
+    graph->V = V;
+    graph->N = N;
+    for (int i = 0; i < V; ++i) {
+        graph->adj[i] = NULL;
+    }
+    return graph;
+}
+
+// Function to add an edge to the graph
+void add_edge(Graph *graph, int src, int dest, int *weights) {
+    Edge *edge = malloc(sizeof(Edge));
+    edge->target = dest;
+    edge->weights = weights;
+    edge->next = graph->adj[src];
+    graph->adj[src] = edge;
+}
+
+// Helper function to create a new node for the priority queue
+Node *new_node(int vertex, int step, int cost) {
+    Node *node = malloc(sizeof(Node));
+    node->vertex = vertex;
+    node->step = step;
+    node->cost = cost;
+    return node;
+}
+
+// Function to initialize a min-heap
+MinHeap *create_min_heap() {
+    MinHeap *heap = malloc(sizeof(MinHeap));
+    heap->size = 0;
+    return heap;
+}
+
+// Min-heap utility functions
+void swap(Node **a, Node **b) {
+    Node *temp = *a;
+    *a = *b;
+    *b = temp;
+}
+
+void heapify_up(MinHeap *heap, int idx) {
+    if (idx && heap->nodes[idx]->cost < heap->nodes[(idx - 1) / 2]->cost) {
+        swap(&heap->nodes[idx], &heap->nodes[(idx - 1) / 2]);
+        heapify_up(heap, (idx - 1) / 2);
+    }
+}
+
+void heapify_down(MinHeap *heap, int idx) {
+    int smallest = idx;
+    int left = 2 * idx + 1;
+    int right = 2 * idx + 2;
+
+    if (left < heap->size && heap->nodes[left]->cost < heap->nodes[smallest]->cost) {
+        smallest = left;
+    }
+
+    if (right < heap->size && heap->nodes[right]->cost < heap->nodes[smallest]->cost) {
+        smallest = right;
+    }
+
+    if (smallest != idx) {
+        swap(&heap->nodes[idx], &heap->nodes[smallest]);
+        heapify_down(heap, smallest);
+    }
+}
+
+void insert_min_heap(MinHeap *heap, Node *node) {
+    heap->nodes[heap->size] = node;
+    heapify_up(heap, heap->size++);
+}
+
+Node *extract_min(MinHeap *heap) {
+    if (!heap->size) return NULL;
+    Node *root = heap->nodes[0];
+    heap->nodes[0] = heap->nodes[--heap->size];
+    heapify_down(heap, 0);
+    return root;
+}
+
+// Dijkstra's algorithm with periodic weights
+int *dijkstra(Graph *graph, int start, int end, int *path_len) {
+    int V = graph->V;
+    int N = graph->N;
+
+    // 2D array to store distances for each vertex at each step
+    int dist[V][N];
+    int prev[V][N];
+    bool visited[V][N];
+
+    for (int i = 0; i < V; i++) {
+        for (int j = 0; j < N; j++) {
+            dist[i][j] = INF;
+            prev[i][j] = -1;
+            visited[i][j] = false;
+        }
+    }
+
+    // Initialize the starting vertex
+    dist[start][0] = 0;
+
+    MinHeap *heap = create_min_heap();
+    insert_min_heap(heap, new_node(start, 0, 0));
+
+    while (heap->size > 0) {
+        Node *current = extract_min(heap);
+        int u = current->vertex;
+        int step = current->step % N;
+        int current_cost = current->cost;
+        free(current);
+
+        if (visited[u][step]) continue;
+        visited[u][step] = true;
+
+        if (u == end) break;
+
+        // Explore neighbors
+        Edge *edge = graph->adj[u];
+        while (edge) {
+            int v = edge->target;
+            int next_step = (step + 1) % N;
+            int weight = edge->weights[step];
+            int new_cost = current_cost + weight;
+
+            if (new_cost < dist[v][next_step]) {
+                dist[v][next_step] = new_cost;
+                prev[v][next_step] = u;
+                insert_min_heap(heap, new_node(v, next_step, new_cost));
+            }
+            edge = edge->next;
+        }
+    }
+
+    // Find the minimum cost to reach the end node across all steps
+    int min_cost = INF;
+    int final_step = -1;
+    for (int i = 0; i < N; i++) {
+        if (dist[end][i] < min_cost) {
+            min_cost = dist[end][i];
+            final_step = i;
+        }
+    }
+
+    if (min_cost == INF) {
+        *path_len = 0;
         return NULL;
     }
-    new_node->label = label;
-    new_node->edges = NULL;  // No edges initially
-    new_node->next = NULL;  // No next node initially
-    return new_node;
+
+    // Reconstruct the path
+    int *path = malloc(V * sizeof(int));
+    *path_len = 0;
+
+    for (int at = end, step = final_step; at != -1; step = (step - 1 + N) % N) {
+        path[(*path_len)++] = at;
+        at = prev[at][step];
+    }
+
+    // Reverse the path to get start → end
+    for (int i = 0; i < *path_len / 2; i++) {
+        int temp = path[i];
+        path[i] = path[*path_len - i - 1];
+        path[*path_len - i - 1] = temp;
+    }
+
+    return path;
 }
 
-// Function to create a new edge
-Edge* create_edge(int to_node, int *weights, int weight_count) {
-    Edge *new_edge = (Edge*)malloc(sizeof(Edge));
-    if (new_edge == NULL) {
-        perror("Error allocating memory for new edge");
-        return NULL;
-    }
-    new_edge->to_node = to_node;
-    for (int i = 0; i < weight_count; i++) {
-        new_edge->weights[i] = weights[i];
-    }
-    new_edge->weight_count = weight_count;
-    new_edge->next = NULL;  // No next edge initially
-    return new_edge;
-}
 
-// Function to find a node by label (returns NULL if not found)
-GraphNode* find_node(GraphNode *head, int label) {
-    GraphNode *current = head;
-    while (current != NULL) {
-        if (current->label == label) {
-            return current;
-        }
-        current = current->next;
-    }
-    return NULL;
-}
-
-// Function to add a new node to the graph (to the end of the linked list)
-void add_node(GraphNode **head, int label) {
-    if (find_node(*head, label) != NULL) {
-        return;  // Node already exists, no need to add it
+// Main function to process input and output
+int main(int argc, char **argv) {
+    if (argc != 2) {
+        fprintf(stderr, "Usage: %s <input_file>\n", argv[0]);
+        return EXIT_FAILURE;
     }
 
-    GraphNode *new_node = create_node(label);
-    if (*head == NULL) {
-        *head = new_node;
-    } else {
-        GraphNode *current = *head;
-        while (current->next != NULL) {
-            current = current->next;
-        }
-        current->next = new_node;
-    }
-}
-
-// Function to add an edge between two nodes
-void add_edge(GraphNode *head, int from_node, int to_node, int *weights, int weight_count) {
-    GraphNode *from = find_node(head, from_node);
-    if (from == NULL) {
-        return;  // From node does not exist
-    }
-
-    // Create a new edge and add it to the adjacency list of the from node
-    Edge *new_edge = create_edge(to_node, weights, weight_count);
-    if (from->edges == NULL) {
-        from->edges = new_edge;
-    } else {
-        Edge *current = from->edges;
-        while (current->next != NULL) {
-            current = current->next;
-        }
-        current->next = new_edge;
-    }
-}
-
-// Function to read from the file and populate the graph
-GraphNode* read_graph_file(const char *filename) {
-    FILE *file = fopen(filename, "r");  // Open the file in read mode
-    if (file == NULL) {
+    FILE *file = fopen(argv[1], "r");
+    if (!file) {
         perror("Error opening file");
-        return NULL;
+        return EXIT_FAILURE;
     }
 
-    GraphNode *head = NULL;  // Start with an empty linked list of nodes
+    int V, N;
+    fscanf(file, "%d %d", &V, &N);
 
-    char line[256];  // Buffer to hold each line
-    while (fgets(line, sizeof(line), file)) {  // Read each line
-        // Remove the newline character at the end of the line if present
-        line[strcspn(line, "\n")] = 0;
+    Graph *graph = create_graph(V, N);
 
-        // Parse the from and to node labels
-        int from_node, to_node;
-        if (sscanf(line, "%d %d", &from_node, &to_node) == 2) {
-            // Parse the weights (remaining numbers in the line)
-            int weights[MAX_WEIGHTS];
-            int weight_count = 0;
-            char *token = strtok(line, " ");  // Tokenize by spaces
-            token = strtok(NULL, " ");  // Skip the "from_node"
-            token = strtok(NULL, " ");  // Skip the "to_node"
-
-            // Parse the weights
-            while (token != NULL && weight_count < MAX_WEIGHTS) {
-                weights[weight_count] = atoi(token);  // Convert string to integer
-                weight_count++;
-                token = strtok(NULL, " ");  // Get next token (next weight)
-            }
-
-            // Add the nodes to the graph if they don't exist
-            add_node(&head, from_node);
-            add_node(&head, to_node);
-
-            // Add the edge between the nodes
-            add_edge(head, from_node, to_node, weights, weight_count);
+    while (!feof(file)) {
+        int src, dest, *weights = malloc(N * sizeof(int));
+        fscanf(file, "%d %d", &src, &dest);
+        for (int i = 0; i < N; ++i) {
+            fscanf(file, "%d", &weights[i]);
         }
+        add_edge(graph, src, dest, weights);
     }
 
-    fclose(file);  // Close the file
-    return head;  // Return the head of the graph
-}
+    fclose(file);
 
-// Function to print the graph for verification
-void print_graph(GraphNode *head) {
-    GraphNode *node = head;
-    while (node != NULL) {
-        printf("Node %d:\n", node->label);
-        Edge *edge = node->edges;
-        while (edge != NULL) {
-            printf("  -> To Node %d, Weights: ", edge->to_node);
-            for (int i = 0; i < edge->weight_count; i++) {
-                printf("%d ", edge->weights[i]);
-            }
-            printf("\n");
-            edge = edge->next;
+    int start, end;
+    while (scanf("%d %d", &start, &end) == 2) {
+        int path_len;
+        int *path = dijkstra(graph, start, end, &path_len);
+        for (int i = 0; i < path_len; i++) {
+            if (i > 0) printf(" ");
+            printf("%d", path[i]);
         }
         printf("\n");
-        node = node->next;
-    }
-}
-
-// Function to free allocated memory for the graph
-void free_graph(GraphNode *head) {
-    GraphNode *node = head;
-    while (node != NULL) {
-        GraphNode *to_free = node;
-        Edge *edge = node->edges;
-        while (edge != NULL) {
-            Edge *edge_to_free = edge;
-            edge = edge->next;
-            free(edge_to_free);
-        }
-        node = node->next;
-        free(to_free);
-    }
-}
-
-#define MAX_NODES 100 // Define a max number of nodes for simplicity
-
-// Helper function to find the minimum distance node not yet visited
-int find_min_distance_node(int *distances, bool *visited, int node_count) {
-    int min_distance = INT_MAX;
-    int min_index = -1;
-
-    for (int i = 0; i < node_count; i++) {
-        if (!visited[i] && distances[i] < min_distance) {
-            min_distance = distances[i];
-            min_index = i;
-        }
-    }
-    return min_index;
-}
-void print_path(int *parent, int node) {
-    if (node == -1) {
-        return;
-    }
-    print_path(parent, parent[node]);
-    printf("%d ", node);
-}
-// Function to find the shortest path using Dijkstra's algorithm
-void find_shortest_path(GraphNode *graph, int from_node, int to_node) {
-    int distances[MAX_NODES];    // Array to store the shortest distance to each node
-    bool visited[MAX_NODES];     // Array to track visited nodes
-    int parent[MAX_NODES];       // Array to store the parent of each node in the shortest path
-
-    // Initialize distances, visited, and parent arrays
-    for (int i = 0; i < MAX_NODES; i++) {
-        distances[i] = INT_MAX;
-        visited[i] = false;
-        parent[i] = -1;
+        free(path);
     }
 
-    // Set the distance to the starting node as 0
-    distances[from_node] = 0;
-
-    // Iterate through all nodes in the graph
-    for (int i = 0; i < MAX_NODES - 1; i++) {
-        // Find the node with the smallest distance that hasn't been visited yet
-        int current = find_min_distance_node(distances, visited, MAX_NODES);
-        if (current == -1 || current == to_node) {
-            break; // No more reachable nodes or reached the target node
-        }
-
-        visited[current] = true;
-
-        // Get the current node from the graph
-        GraphNode *node = find_node(graph, current);
-        if (node == NULL) {
-            continue;
-        }
-
-        // Update distances for each neighbor
-        Edge *edge = node->edges;
-        while (edge != NULL) {
-            int neighbor = edge->to_node;
-
-            // Iterate through weights sequentially for this edge
-            for (int weight_index = 0; weight_index < edge->weight_count; weight_index++) {
-                int weight = edge->weights[weight_index];
-
-                // Check if a shorter path to the neighbor exists
-                if (!visited[neighbor] && distances[current] != INT_MAX &&
-                    distances[current] + weight < distances[neighbor]) {
-                    distances[neighbor] = distances[current] + weight;
-                    parent[neighbor] = current;
-                }
-            }
-            edge = edge->next;
-        }
-    }
-
-    // Check if there's a path to the destination
-    if (distances[to_node] == INT_MAX) {
-        printf("No path exists between %d and %d.\n", from_node, to_node);
-    } else {
-        printf("Shortest path from %d to %d: ", from_node, to_node);
-        print_path(parent, to_node);
-        printf("\n");
-        printf("Total weight: %d\n", distances[to_node]);
-    }
-}
-
-
-int main(int argc, char *argv[]) {
-//   /  const char *filename = argv[1];
-    GraphNode *graph = read_graph_file("graph.txt"); //change before submitting 
-
-    if (graph == NULL) {
-        return 1;  // Error reading file
-    }
-
-    int from_node, to_node;
-    if (scanf("%d %d", &from_node, &to_node) != 2) {
-        printf("Invalid input\n");
-        return 1;
-    }
-    find_shortest_path(graph, from_node, to_node);
-
-  print_graph(graph);  // Print the graph for verification
-    free_graph(graph);  // Free allocated memory
-    return 0;
+    return EXIT_SUCCESS;
 }
