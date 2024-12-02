@@ -78,9 +78,11 @@ void swap(Node **a, Node **b) {
 }
 
 void heapify_up(MinHeap *heap, int idx) {
-    if (idx && heap->nodes[idx]->cost < heap->nodes[(idx - 1) / 2]->cost) {
-        swap(&heap->nodes[idx], &heap->nodes[(idx - 1) / 2]);
-        heapify_up(heap, (idx - 1) / 2);
+    if (idx && heap->nodes[idx] && heap->nodes[(idx - 1) / 2]) {
+        if (heap->nodes[idx]->cost < heap->nodes[(idx - 1) / 2]->cost) {
+            swap(&heap->nodes[idx], &heap->nodes[(idx - 1) / 2]);
+            heapify_up(heap, (idx - 1) / 2);
+        }
     }
 }
 
@@ -104,8 +106,10 @@ void heapify_down(MinHeap *heap, int idx) {
 }
 
 void insert_min_heap(MinHeap *heap, Node *node) {
-    heap->nodes[heap->size] = node;
-    heapify_up(heap, heap->size++);
+    if (heap->size < MAX_VERTICES * 10) {
+        heap->nodes[heap->size] = node;
+        heapify_up(heap, heap->size++);
+    }
 }
 
 Node *extract_min(MinHeap *heap) {
@@ -138,7 +142,7 @@ int *dijkstra(Graph *graph, int start, int end, int *path_len) {
     dist[start][0] = 0;
 
     MinHeap *heap = create_min_heap();
-    insert_min_heap(heap, new_node(start, 0, 0));
+    insert_min_heap(heap, new_node(start, 0, 0)); // Push start node into heap
 
     while (heap->size > 0) {
         Node *current = extract_min(heap);
@@ -159,11 +163,12 @@ int *dijkstra(Graph *graph, int start, int end, int *path_len) {
             int next_step = (step + 1) % N;
             int weight = edge->weights[step];
             int new_cost = current_cost + weight;
-
-            if (new_cost < dist[v][next_step]) {
-                dist[v][next_step] = new_cost;
-                prev[v][next_step] = u;
-                insert_min_heap(heap, new_node(v, next_step, new_cost));
+            if (v >= 0 && v < V && next_step >= 0 && next_step < N) {
+                if (new_cost < dist[v][next_step]) {
+                    dist[v][next_step] = new_cost;
+                    prev[v][next_step] = u;
+                    insert_min_heap(heap, new_node(v, next_step, new_cost));
+                }
             }
             edge = edge->next;
         }
@@ -202,6 +207,25 @@ int *dijkstra(Graph *graph, int start, int end, int *path_len) {
 
     return path;
 }
+void free_graph(Graph *graph) {
+    for (int i = 0; i < graph->V; ++i) {
+        Edge *edge = graph->adj[i];
+        while (edge) {
+            Edge *temp = edge;
+            edge = edge->next;
+            free(temp->weights);
+            free(temp);
+        }
+    }
+    free(graph);
+}
+
+void free_heap(MinHeap *heap) {
+    for (int i = 0; i < heap->size; ++i) {
+        free(heap->nodes[i]);
+    }
+    free(heap);
+}
 
 
 // Main function to process input and output
@@ -218,15 +242,26 @@ int main(int argc, char **argv) {
     }
 
     int V, N;
-    fscanf(file, "%d %d", &V, &N);
+    if (fscanf(file, "%d %d", &V, &N) != 2) {
+        fprintf(stderr, "Invalid input format\n");
+        fclose(file);
+        return EXIT_FAILURE;
+    }
 
     Graph *graph = create_graph(V, N);
 
     while (!feof(file)) {
-        int src, dest, *weights = malloc(N * sizeof(int));
-        fscanf(file, "%d %d", &src, &dest);
+        int src, dest;
+        int *weights = malloc(N * sizeof(int));
+        if (fscanf(file, "%d %d", &src, &dest) != 2) break;
         for (int i = 0; i < N; ++i) {
-            fscanf(file, "%d", &weights[i]);
+            if (fscanf(file, "%d", &weights[i]) != 1) {
+                fprintf(stderr, "Error reading weights\n");
+                free(weights);
+                fclose(file);
+                free_graph(graph);
+                return EXIT_FAILURE;
+            }
         }
         add_edge(graph, src, dest, weights);
     }
@@ -237,13 +272,19 @@ int main(int argc, char **argv) {
     while (scanf("%d %d", &start, &end) == 2) {
         int path_len;
         int *path = dijkstra(graph, start, end, &path_len);
-        for (int i = 0; i < path_len; i++) {
-            if (i > 0) printf(" ");
-            printf("%d", path[i]);
+        if (path) {
+            for (int i = 0; i < path_len; i++) {
+                if (i > 0) printf(" ");
+                printf("%d", path[i]);
+            }
+            printf("\n");
+            free(path);
+        } else {
+            printf("No path found\n");
         }
-        printf("\n");
-        free(path);
     }
 
+    free_graph(graph);
     return EXIT_SUCCESS;
 }
+
